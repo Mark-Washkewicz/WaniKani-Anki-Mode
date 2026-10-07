@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wanikani Anki Mode
 // @namespace    wkankimode
-// @version      3.0.12
+// @version      3.0.13
 // @description  Anki mode for Wanikani; DoubleCheck 3.0 Support;
 // @author       JDurman
 // @match       https://www.wanikani.com/*
@@ -38,6 +38,78 @@ window.ankimode = {};
     function url_matches(patterns, url) { patterns = patterns || match_patterns; url = url || window.location.pathname; if (url[0] !== '/') url = new URL(url).pathname; return ((Array.isArray(patterns) ? patterns : [patterns]).findIndex((pattern) => { let regex = new RegExp(pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*')); return (regex.test(url)); }) >= 0); }
     function is_turbo_page() { return (document.querySelector('script[type="importmap"]')?.innerHTML.match('@hotwired/turbo') != null); }
     function get_controller(name) { return Stimulus.getControllerForElementAndIdentifier(document.querySelector(`[data-controller~="${name}"]`), name); }
+
+    // Prefer the quiz-input Stimulus controller's targets over hardcoded ids/classes, which WK keeps changing.
+    function refresh_quiz_input() {
+        try { quiz_input = get_controller('quiz-input') || quiz_input; } catch (e) { }
+        return quiz_input;
+    }
+
+    function real_input() {
+        return refresh_quiz_input()?.inputTarget || document.querySelector('#user-response');
+    }
+
+    function jq_real_input() {
+        const input = real_input();
+        return input ? $(input) : $();
+    }
+
+    function input_container() {
+        return refresh_quiz_input()?.inputContainerTarget || document.querySelector('.quiz-input__input-container');
+    }
+
+    function answer_state() {
+        const state = input_container()?.getAttribute('correct');
+        if (state === 'true') return 'correct';
+        if (state === 'false') return 'incorrect';
+        return null;
+    }
+
+    function submit_answer() {
+        const controller = refresh_quiz_input();
+
+        // Going through the controller keeps Double-Check's submit hooks working.
+        if (controller && typeof controller.submitAnswer === 'function') {
+            controller.submitAnswer({
+                preventDefault() { },
+                stopPropagation() { },
+                target: controller.element,
+                currentTarget: controller.element,
+            });
+            return;
+        }
+
+        const form = real_input()?.closest('form');
+        if (form?.requestSubmit) {
+            form.requestSubmit();
+        } else {
+            $(".quiz-input__submit-button").click();
+        }
+    }
+
+    function create_spoof_input() {
+        if (document.querySelector('#WKANKIMODE_answer_input')) return;
+
+        const input = real_input();
+        if (!input) return;
+
+        const clone = input.cloneNode(false);
+        clone.id = 'WKANKIMODE_answer_input';
+        clone.name = 'WKANKIMODE_answer_input';
+        clone.placeholder = 'Your Response';
+
+        // Strip data-* so the clone doesn't register as another Stimulus target.
+        [...clone.attributes].forEach((attr) => {
+            if (attr.name.startsWith('data-')) {
+                clone.removeAttribute(attr.name);
+            }
+        });
+        clone.removeAttribute('lang');
+        clone.removeAttribute('required');
+
+        input.insertAdjacentElement('afterend', clone);
+        clone.style.display = 'none';
+    }
 
     if (is_turbo_page()) {
         try { app_load(); } catch (e) { }
@@ -105,6 +177,8 @@ window.ankimode = {};
     let srs_map;
     let answer_checker;
     let typedAnswerJustSubmitted = true;
+    let additional_content, item_info, subject_info, quiz_audio, quiz_stats, quiz_progress, quiz_header;
+    let response_helpers, srs_mgr;
 
 
 
@@ -227,27 +301,27 @@ window.ankimode = {};
             settings.showAnswer_hotkey = $("#ankimode_dialog #ankimode_showAnswer_hotkey").val();
 
             if (!$("#WKANKIMODE_answer_input").length) {
-                $('#user-response').clone().attr('id', 'WKANKIMODE_answer_input').attr('name', 'WKANKIMODE_answer_input').attr('placeholder', "Your Response").removeAttr("data-wanakana-id lang").insertAfter("#user-response").hide();
+                create_spoof_input();
 
                 //show spoofed input
-                $('#user-response').hide();
+                jq_real_input().hide();
                 $('#WKANKIMODE_answer_input').show();
 
 
-                $('#user-response,#WKANKIMODE_answer_input').focus(function (e) {
+                jq_real_input().add('#WKANKIMODE_answer_input').off('focus.ankimode').on('focus.ankimode', function (e) {
                     //If type reading feature is on and the question is a reading dont blur.
                     var questionType = getQuestionType();
                     if (questionType === "meaning" || !settings.type_readings) {
                         $(this).blur();
                     }
                 });
-                $('#user-response,#WKANKIMODE_answer_input').blur();
+                jq_real_input().add('#WKANKIMODE_answer_input').blur();
             }
 
             if (settings.type_readings) {
                 newQuestion();
             } else {
-                $('#user-response').hide();
+                jq_real_input().hide();
                 $('#WKANKIMODE_answer_input').show();
             }
 
@@ -304,7 +378,7 @@ window.ankimode = {};
         var ankimodestate = localStorage.getItem('ankimodestate');
         if (ankimodestate === 'false' || ankimodestate === 'true') {
             localStorage.removeItem('ankimodestate');
-            settings.ankimode_enabled = ankimodestate;
+            settings.ankimode_enabled = (ankimodestate === 'true');
             wkof.Settings.save('ankimode');
         }
 
@@ -322,22 +396,29 @@ window.ankimode = {};
     async function startup() {
         quiz_input = get_controller('quiz-input');
         quiz_queue = get_controller('quiz-queue');
-        additional_content = get_controller('additional-content');
-        item_info = get_controller('item-info');
-        subject_info = get_controller('subject-info');
-        quiz_audio = get_controller('quiz-audio');
-        quiz_stats = get_controller('quiz-statistics');
-        quiz_progress = get_controller('quiz-progress');
-        quiz_header = get_controller('quiz-header');
-        response_helpers = await importShim('lib/answer_checker/utils/response_helpers');
-        answer_checker = Stimulus.controllers.find((c) => c.answerChecker)?.answerChecker;
-        if (!answer_checker) {
-            let AnswerChecker = (await importShim('lib/answer_checker/answer_checker')).default;
-            answer_checker = new AnswerChecker;
-        }
-        if (quiz_queue.hasSubjectIdsWithSRSTarget) {
-            srs_mgr = quiz_queue.quizQueue.srsManager;
-        } else {
+        // Not every quiz page has every controller, so don't let a missing one abort startup.
+        try { additional_content = get_controller('additional-content'); } catch (e) { }
+        try { item_info = get_controller('item-info'); } catch (e) { }
+        try { subject_info = get_controller('subject-info'); } catch (e) { }
+        try { quiz_audio = get_controller('quiz-audio'); } catch (e) { }
+        try { quiz_stats = get_controller('quiz-statistics'); } catch (e) { }
+        try { quiz_progress = get_controller('quiz-progress'); } catch (e) { }
+        try { quiz_header = get_controller('quiz-header'); } catch (e) { }
+        try { response_helpers = await importShim('lib/answer_checker/utils/response_helpers'); } catch (e) { }
+        try {
+            answer_checker = Stimulus.controllers.find((c) => c.answerChecker)?.answerChecker;
+            if (!answer_checker) {
+                let AnswerChecker = (await importShim('lib/answer_checker/answer_checker')).default;
+                answer_checker = new AnswerChecker;
+            }
+        } catch (e) { }
+        try {
+            if (quiz_queue?.hasSubjectIdsWithSRSTarget) {
+                srs_mgr = quiz_queue.quizQueue.srsManager;
+            } else {
+                srs_mgr = undefined;
+            }
+        } catch (e) {
             srs_mgr = undefined;
         }
 
@@ -455,24 +536,24 @@ window.ankimode = {};
     function ankimode_start() {
         ankiModeEnabled = true;
 
-        $('#user-response').clone().attr('id', 'WKANKIMODE_answer_input').attr('name', 'WKANKIMODE_answer_input').attr('placeholder', "Your Response").removeAttr("data-wanakana-id lang").insertAfter("#user-response").hide();
+        create_spoof_input();
 
         //show spoofed input
-        $('#user-response').hide();
+        jq_real_input().hide();
         $('#WKANKIMODE_answer_input').show();
 
-        //Reset question if review or self study. 
+        //Reset question if review or self study.
         window.addEventListener(`willShowNextQuestion`, newQuestion);
 
         $('#answer-form button').hide();
-        $('#user-response,#WKANKIMODE_answer_input').focus(function (e) {
+        jq_real_input().add('#WKANKIMODE_answer_input').off('focus.ankimode').on('focus.ankimode', function (e) {
             //If type reading feature is on and the question is a reading dont blur.
             var questionType = getQuestionType();
             if (questionType === "meaning" || !settings.type_readings) {
                 $(this).blur();
             }
         });
-        $('#user-response,#WKANKIMODE_answer_input').blur();
+        jq_real_input().add('#WKANKIMODE_answer_input').blur();
 
         //Trigger new question to reset and check all settings for which to start on.
         newQuestion();
@@ -482,7 +563,7 @@ window.ankimode = {};
         ankiModeEnabled = false;
 
         //remove event listeners
-        $("#user-response").off("focus");
+        jq_real_input().off("focus.ankimode");
         $('#answer-form button').show();
 
         //hide anki mode buttons
@@ -491,34 +572,34 @@ window.ankimode = {};
         $(".WKANKIMODE_button.show").hide();
         $(".WKANKIMODE_button.next").hide();
 
-        $("#user-response").focus();
+        jq_real_input().focus();
 
-        if (!($(".quiz-input__input-container[correct=true]").length === 1) && !($(".quiz-input__input-container[correct=false]").length === 1)) {
-            $("#user-response").val("");
+        if (!answer_state()) {
+            jq_real_input().val("");
         }
 
         $("#WKANKIMODE_answer_input").remove();
-        $('#user-response').show();
+        jq_real_input().show();
     }
 
     function getCurrentItem() {
-        return quiz_input.currentSubject;
+        return refresh_quiz_input()?.currentSubject;
     }
 
     function getQuestionType() {
-        return quiz_input.currentQuestionType;
+        return refresh_quiz_input()?.currentQuestionType;
     }
 
     function playAudio(reading) {
         var questionType = getQuestionType();
         if (questionType !== "meaning") {
 
-            let readings = getCurrentItem().readings
+            let readings = getCurrentItem()?.readings
 
             if (readings && readings.length > 0) {
-                //grab first reading or typed reading.    
+                //grab first reading or typed reading.
                 if (settings.type_readings) {
-                    reading = $("#user-response").val();
+                    reading = jq_real_input().val();
                 }
 
                 let pronunciation = readings.filter((a) => a.reading == reading);
@@ -546,8 +627,8 @@ window.ankimode = {};
     //resets the state of the forms for a new question.
     function newQuestion() {
         if (ankiModeEnabled) {
-            quiz_input = get_controller('quiz-input');
-            quiz_audio = get_controller('quiz-audio');
+            refresh_quiz_input();
+            try { quiz_audio = get_controller('quiz-audio'); } catch (e) { }
             var questionType = getQuestionType();
 
             secondNoTriggered = false;
@@ -555,46 +636,53 @@ window.ankimode = {};
             answerShown = false;
             hideAnswerButtons();
 
-            $("#WKANKIMODE_answer_input").attr("placeholder", $("#user-response").attr("placeholder"));
+            // WK may have re-rendered the input, taking the spoofed one with it.
+            create_spoof_input();
 
-            $("#user-response").val('');
+            $("#WKANKIMODE_answer_input").attr("placeholder", jq_real_input().attr("placeholder"));
+
+            jq_real_input().val('');
             $("#WKANKIMODE_answer_input").val('');
 
-            
 
-            if (settings.type_readings) {              
+
+            if (settings.type_readings) {
                 if (questionType === "meaning") {
-                    $('#user-response').hide();
+                    jq_real_input().hide();
                     $('#WKANKIMODE_answer_input').show();
                 } else {
                     $("#WKANKIMODE_answer_input").hide();
-                    $('#user-response').show();
+                    jq_real_input().show();
                     hideButtonsForTyping();
-                    $('#user-response').focus();
+                    jq_real_input().focus();
                 }
+            } else {
+                jq_real_input().hide();
+                $('#WKANKIMODE_answer_input').show();
             }
         }
     }
 
     function showAnswer() {
-        if (!($(".quiz-input__input-container[correct=true]").length === 1) &&
-            !($(".quiz-input__input-container[correct=false]").length === 1) &&
-            !answerShown) {
+        if (!answer_state() && !answerShown) {
             firstCorrectAnswer = "";
             var currentItem = getCurrentItem();
             var questionType = getQuestionType();
+            if (!currentItem) return;
             if (questionType === "meaning") {
                 var answer = currentItem.meanings
                    .filter(m => m.kind === 'primary' || m.kind === 'alternative')
                    .map(m => m.text)
                    .join(", ");
-                let synonyms = quiz_input.quizUserSynonymsOutlet.synonymsForSubjectId(getCurrentItem().id);
-                if (synonyms && synonyms.length) {
-                    answer += " (" + synonyms.join(", ") + ")";
-                }
+                try {
+                    let synonyms = quiz_input.quizUserSynonymsOutlet.synonymsForSubjectId(currentItem.id);
+                    if (synonyms && synonyms.length) {
+                        answer += " (" + synonyms.join(", ") + ")";
+                    }
+                } catch (e) { }
 
                 firstCorrectAnswer = currentItem.meanings[0].text;
-                $("#user-response,#WKANKIMODE_answer_input").val(answer);
+                jq_real_input().add("#WKANKIMODE_answer_input").val(answer);
             } else { //READING QUESTION
                 var i = 0;
                 var singleAnswer = "";
@@ -604,7 +692,7 @@ window.ankimode = {};
                 fullAnswer = currentItem.readings.map(x => x.text).join(", ");
 
                 firstCorrectAnswer = singleAnswer;
-                $("#user-response").val(singleAnswer);
+                jq_real_input().val(singleAnswer);
 
                 $("#WKANKIMODE_answer_input").val(fullAnswer);
             }
@@ -618,9 +706,9 @@ window.ankimode = {};
     }
 
     function nextAnswer() {
-        if ($(".quiz-input__input-container[correct=true]").length === 1) {
+        if (answer_state() === 'correct') {
             answerCorrect();
-        } else if ($(".quiz-input__input-container[correct=false]").length === 1) {
+        } else if (answer_state() === 'incorrect') {
             answerIncorrect();
         }
     }
@@ -629,11 +717,11 @@ window.ankimode = {};
         // Fix for multiple answers in reading
         if (answerShown) {
             if (firstCorrectAnswer) {
-                $("#user-response").val(firstCorrectAnswer);
+                jq_real_input().val(firstCorrectAnswer);
                 firstCorrectAnswer = "";
             }
 
-            $(".quiz-input__submit-button").click();
+            submit_answer();
             answerShown = false;
 
             //if lightning mode then move on to the next answer if not then show next button
@@ -645,8 +733,8 @@ window.ankimode = {};
         }
 
         // if answer is shown, press correct hotkey one more time to go to next
-        if ($(".quiz-input__input-container[correct=true]").length === 1) {
-            $(".quiz-input__submit-button").click();
+        if (answer_state() === 'correct') {
+            submit_answer();
         }
     }
 
@@ -654,31 +742,31 @@ window.ankimode = {};
         if (answerShown) {
             var questionType = getQuestionType();
             if (questionType === 'meaning') {
-                $("#user-response,#WKANKIMODE_answer_input").val('xxxxxx');
+                jq_real_input().add("#WKANKIMODE_answer_input").val('xxxxxx');
             } else {
-                $("#user-response,#WKANKIMODE_answer_input").val('ばつっっっ');
+                jq_real_input().add("#WKANKIMODE_answer_input").val('ばつっっっ');
             }
 
-            $(".quiz-input__submit-button").click();
+            submit_answer();
             answerShown = false;
             showNextButton();
 
             return;
         }
 
-        if ($(".quiz-input__input-container[correct=false]").length === 1) {
+        if (answer_state() === 'incorrect') {
             if (window.doublecheck) {
                 if (!secondNoTriggered) {
                     secondNoTriggered = true;
                     setTimeout(function () {
 
-                        $(".quiz-input__submit-button").click();
+                        submit_answer();
                         secondNoTriggered = false;
 
                     }, settings.doublecheck_delay_period * 1000); //needs to match the doublecheck delay period. Otherwise it wont allow the question to continue.
                 }
             } else {
-                $(".quiz-input__submit-button").click();
+                submit_answer();
             }
         }
     }
@@ -712,16 +800,15 @@ window.ankimode = {};
     }
 
     function bindHotkeys() {
-        $('body').on("keydown", function (event) {
+        $('body').off("keydown.ankimode").on("keydown.ankimode", function (event) {
 
-            if (($(".quiz").length == 1) && !$("*:focus").is("textarea, input") && settings.ankimode_enabled) {
+            if (refresh_quiz_input() && !$("*:focus").is("textarea, input") && settings.ankimode_enabled) {
                 switch (event.keyCode) {
                     //key: enter
                     case 13:
-                        if (($(".quiz-input__input-container[correct=true]").length === 1 ||
-                            $(".quiz-input__input-container[correct=false]").length === 1)) {
+                        if (answer_state()) {
                             if (settings.type_readings) {
-                                if ($(".quiz-input__input-container[correct=false]").length === 1) {
+                                if (answer_state() === 'incorrect') {
                                     if (typedAnswerJustSubmitted == true) {
                                         typedAnswerJustSubmitted = false;
                                     } else {
