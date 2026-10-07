@@ -404,15 +404,23 @@ window.ankimode = {};
     }
 
 
-    async function startup() {
-        quiz_input = get_controller('quiz-input');
-        if (!quiz_input) {
-            // Matched a non-quiz page such as the review summary.
-            ankiModeEnabled = false;
-            return;
+    // The quiz controllers can connect a little after turbo:load, so poll briefly instead of giving up.
+    async function wait_for_quiz_input(timeout_ms = 5000) {
+        const deadline = Date.now() + timeout_ms;
+        while (Date.now() < deadline) {
+            try {
+                const controller = get_controller('quiz-input');
+                if (controller) return controller;
+            } catch (e) { }
+            await new Promise((resolve) => setTimeout(resolve, 100));
         }
-        // Already set up on this page.
-        if ($('#WKANKIMODE_buttons').length) return;
+        return null;
+    }
+
+    async function startup() {
+        quiz_input = await wait_for_quiz_input();
+        // Not a quiz page, e.g. the review summary.
+        if (!quiz_input) return;
         quiz_queue = get_controller('quiz-queue');
         // Not every quiz page has every controller, so don't let a missing one abort startup.
         try { additional_content = get_controller('additional-content'); } catch (e) { }
@@ -439,6 +447,9 @@ window.ankimode = {};
         } catch (e) {
             srs_mgr = undefined;
         }
+
+        // Already set up on this page. Checked after the awaits above so overlapping startups can't both add the UI.
+        if ($('#WKANKIMODE_buttons').length) return;
 
 
         // Turbo may or may not keep our styles across page swaps, so add them only if missing.
@@ -823,10 +834,20 @@ window.ankimode = {};
         $(".WKANKIMODE_button.next").show();
     }
 
+    // WK can re-render and refocus the answer box, so focus on it alone shouldn't disable the hotkeys.
+    function typing_in_field() {
+        const el = document.activeElement;
+        if (!el || !$(el).is("textarea, input")) return false;
+        if (el.id === 'WKANKIMODE_answer_input') return false;
+        // The real answer box only counts as typing when the user is meant to type a reading.
+        if (el === real_input()) return settings.type_readings && getQuestionType() !== "meaning";
+        return true;
+    }
+
     function bindHotkeys() {
         $('body').off("keydown.ankimode").on("keydown.ankimode", function (event) {
 
-            if (refresh_quiz_input() && !$("*:focus").is("textarea, input") && settings.ankimode_enabled) {
+            if (refresh_quiz_input() && !typing_in_field() && settings.ankimode_enabled) {
                 switch (event.keyCode) {
                     //key: enter
                     case 13:
