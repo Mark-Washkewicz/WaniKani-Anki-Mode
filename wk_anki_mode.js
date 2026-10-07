@@ -136,6 +136,9 @@ window.ankimode = {};
         setTimeout(() => {
             if(!scriptLoading){
                 load_script();
+            } else if (setup_done) {
+                // Turbo swapped in a new quiz page (e.g. a second review session), so rebuild the UI on it.
+                startup();
             }
 
             wkof.Menu.insert_script_link({ name: 'ankimode', submenu: 'Settings', title: 'Anki Mode', on_click: open_settings });
@@ -289,12 +292,20 @@ window.ankimode = {};
     }
 
     var first_time = true;
+    var setup_done = false;
     async function init_ui() {
         settings = wkof.settings.ankimode;
+
+        // Older versions could save this as the string "true"/"false", and "false" is truthy.
+        if (typeof settings.ankimode_enabled === 'string') {
+            settings.ankimode_enabled = (settings.ankimode_enabled === 'true');
+            wkof.Settings.save('ankimode');
+        }
 
         if (first_time) {
             first_time = false;
             await startup();
+            setup_done = true;
         } else {
             settings.correct_hotkey = $("#ankimode_dialog #ankimode_correct_hotkey").val();
             settings.incorrect_hotkey = $("#ankimode_dialog #ankimode_incorrect_hotkey").val();
@@ -395,6 +406,13 @@ window.ankimode = {};
 
     async function startup() {
         quiz_input = get_controller('quiz-input');
+        if (!quiz_input) {
+            // Matched a non-quiz page such as the review summary.
+            ankiModeEnabled = false;
+            return;
+        }
+        // Already set up on this page.
+        if ($('#WKANKIMODE_buttons').length) return;
         quiz_queue = get_controller('quiz-queue');
         // Not every quiz page has every controller, so don't let a missing one abort startup.
         try { additional_content = get_controller('additional-content'); } catch (e) { }
@@ -423,15 +441,20 @@ window.ankimode = {};
         }
 
 
-        if (window.doublecheck) {
-            $('head').append('<style>' + doubleCheckCssModification + '</style>');
-        } else {
-            $('head').append('<style>' + css + '</style>');
+        // Turbo may or may not keep our styles across page swaps, so add them only if missing.
+        if (!$('#WKANKIMODE_style').length) {
+            if (window.doublecheck) {
+                $('head').append('<style id="WKANKIMODE_style">' + doubleCheckCssModification + '</style>');
+            } else {
+                $('head').append('<style id="WKANKIMODE_style">' + css + '</style>');
+            }
         }
 
 
         // Add the Anki Mode button.
-        $('head').append('<style>#anki-mode.anki-active {color:#ff0; opacity:1.0;} #anki-mode { color:#fff;}</style>');
+        if (!$('#WKANKIMODE_button_style').length) {
+            $('head').append('<style id="WKANKIMODE_button_style">#anki-mode.anki-active {color:#ff0; opacity:1.0;} #anki-mode { color:#fff;}</style>');
+        }
         if (settings.ankimode_enabled) {
             $('.character-header__menu-navigation').append('<a id="anki-mode" href="#" class="anki-active"><svg class="wk-icon wk-icon--star" title="Anki Mode - This allows you to turn on or off anki mode." viewBox="0 0 500 500" aria-hidden="true"><use href="#wk-icon__star"></use></svg></a>');
         } else {
@@ -508,7 +531,7 @@ window.ankimode = {};
 
 
         if (window.doublecheck) {
-            $('body').on('click', '#option-retype', function (event) {
+            $('body').off('click.ankimode').on('click.ankimode', '#option-retype', function (event) {
                 if (settings.ankimode_enabled) {
                     newQuestion();
                 }
@@ -543,6 +566,7 @@ window.ankimode = {};
         $('#WKANKIMODE_answer_input').show();
 
         //Reset question if review or self study.
+        window.removeEventListener(`willShowNextQuestion`, newQuestion);
         window.addEventListener(`willShowNextQuestion`, newQuestion);
 
         $('#answer-form button').hide();
