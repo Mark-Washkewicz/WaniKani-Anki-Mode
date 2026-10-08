@@ -181,6 +181,8 @@ window.ankimode = {};
     let srs_map;
     let answer_checker;
     let typedAnswerJustSubmitted = true;
+    // Lesson quizzes only: the user clicked the answer box to type this answer themselves.
+    let typingManually = false;
     let additional_content, item_info, subject_info, quiz_audio, quiz_stats, quiz_progress, quiz_header;
     let response_helpers, srs_mgr;
 
@@ -320,13 +322,7 @@ window.ankimode = {};
                 $('#WKANKIMODE_answer_input').show();
 
 
-                jq_real_input().add('#WKANKIMODE_answer_input').off('focus.ankimode').on('focus.ankimode', function (e) {
-                    //If type reading feature is on and the question is a reading dont blur.
-                    var questionType = getQuestionType();
-                    if (questionType === "meaning" || !settings.type_readings) {
-                        $(this).blur();
-                    }
-                });
+                bind_focus_guard();
                 jq_real_input().add('#WKANKIMODE_answer_input').blur();
             }
 
@@ -542,6 +538,14 @@ window.ankimode = {};
 
 
 
+        // In lesson quizzes, clicking the answer box lets the user type the answer themselves.
+        $('body').off('mousedown.ankimode').on('mousedown.ankimode', '#WKANKIMODE_answer_input', function (event) {
+            if (is_lesson_quiz() && ankiModeEnabled && !answerShown && !answer_state()) {
+                event.preventDefault();
+                start_manual_typing();
+            }
+        });
+
         if (window.doublecheck) {
             $('body').off('click.ankimode').on('click.ankimode', '#option-retype', function (event) {
                 if (settings.ankimode_enabled) {
@@ -582,13 +586,7 @@ window.ankimode = {};
         window.addEventListener(`willShowNextQuestion`, newQuestion);
 
         $('#answer-form button').hide();
-        jq_real_input().add('#WKANKIMODE_answer_input').off('focus.ankimode').on('focus.ankimode', function (e) {
-            //If type reading feature is on and the question is a reading dont blur.
-            var questionType = getQuestionType();
-            if (questionType === "meaning" || !settings.type_readings) {
-                $(this).blur();
-            }
-        });
+        bind_focus_guard();
         jq_real_input().add('#WKANKIMODE_answer_input').blur();
 
         //Trigger new question to reset and check all settings for which to start on.
@@ -682,7 +680,10 @@ window.ankimode = {};
 
 
 
-            if (settings.type_readings) {
+            if (typingManually) {
+                // Stay in the real input until the user clicks out.
+                start_manual_typing();
+            } else if (settings.type_readings) {
                 if (questionType === "meaning") {
                     jq_real_input().hide();
                     $('#WKANKIMODE_answer_input').show();
@@ -835,13 +836,55 @@ window.ankimode = {};
         $(".WKANKIMODE_button.next").show();
     }
 
+    function is_lesson_quiz() {
+        return url_matches(['/subject-lessons/*/quiz', '/subjects/lesson/quiz*']);
+    }
+
+    // Keep focus out of the answer boxes unless the user is meant to type in them.
+    function bind_focus_guard() {
+        jq_real_input().add('#WKANKIMODE_answer_input').off('focus.ankimode').on('focus.ankimode', function (e) {
+            //If type reading feature is on and the question is a reading dont blur.
+            var questionType = getQuestionType();
+            if (!typingManually && (questionType === "meaning" || !settings.type_readings)) {
+                $(this).blur();
+            }
+        });
+    }
+
+    // Swap the spoofed input for WK's real one so the answer can be typed and submitted with Enter.
+    function start_manual_typing() {
+        typingManually = true;
+        hideButtonsForTyping();
+        $('#WKANKIMODE_answer_input').hide();
+        bind_focus_guard();
+        jq_real_input().val('').show().focus()
+            .off('blur.ankimode').on('blur.ankimode', function () {
+                // Ignore switching windows; only clicking elsewhere on the page cancels typing.
+                if (!document.hasFocus() || !typingManually) return;
+                if (answer_state()) {
+                    // Leave the submitted answer on screen; the next item goes back to Anki mode.
+                    typingManually = false;
+                } else {
+                    stop_manual_typing();
+                }
+            });
+    }
+
+    function stop_manual_typing() {
+        typingManually = false;
+        jq_real_input().off('blur.ankimode').val('').hide();
+        $('#WKANKIMODE_answer_input').show();
+        hideAnswerButtons();
+    }
+
     // WK can re-render and refocus the answer box, so focus on it alone shouldn't disable the hotkeys.
     function typing_in_field() {
         const el = document.activeElement;
         if (!el || !$(el).is("textarea, input")) return false;
         if (el.id === 'WKANKIMODE_answer_input') return false;
-        // The real answer box only counts as typing when the user is meant to type a reading.
-        if (el === real_input()) return settings.type_readings && getQuestionType() !== "meaning";
+        // The real answer box only counts as typing when the user is meant to type a reading,
+        // or chose to type this answer themselves and hasn't submitted it yet.
+        if (el === real_input()) return (typingManually && !answer_state()) || (settings.type_readings && getQuestionType() !== "meaning");
         return true;
     }
 
