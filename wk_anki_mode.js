@@ -42,7 +42,8 @@ window.ankimode = {};
     // Prefer the quiz-input Stimulus controller's targets over hardcoded ids/classes, which WK keeps changing.
     function refresh_quiz_input() {
         try { quiz_input = get_controller('quiz-input') || quiz_input; } catch (e) { }
-        return quiz_input;
+        // A controller from a quiz we've left (e.g. back on the lesson slides) mustn't keep the hotkeys active.
+        return quiz_input?.element?.isConnected ? quiz_input : null;
     }
 
     function real_input() {
