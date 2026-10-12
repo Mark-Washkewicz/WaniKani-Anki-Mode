@@ -12,7 +12,7 @@ The original code is still available:
 
 - Repository: [JDurman/WaniKani-Anki-Mode](https://github.com/JDurman/WaniKani-Anki-Mode)
 - Last original release (3.0.12): [`wk_anki_mode.js` at `f45cf75`](https://github.com/JDurman/WaniKani-Anki-Mode/blob/f45cf75e1f093166742a186154ef58636203f864/wk_anki_mode.js)
-- Greasy Fork: [Wanikani Anki Mode](https://greasyfork.org/scripts/437009)
+- Original Greasy Fork listing: [Wanikani Anki Mode](https://greasyfork.org/scripts/437009)
 - Discussion: [WaniKani Community thread](https://community.wanikani.com/t/userscript-anki-mode/54751)
 
 ## Changes since 3.0.12
@@ -28,7 +28,9 @@ The original code is still available:
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) (or another userscript manager).
 2. Install the [WaniKani Open Framework](https://community.wanikani.com/t/instructions-installing-wanikani-open-framework/28549), which this script requires.
-3. Open [`wk_anki_mode.js`](wk_anki_mode.js), copy its contents, and paste them into a new Tampermonkey script. Because the name and namespace match the original, this replaces an existing install of JDurman's version.
+3. Install **Wanikani Anki Mode** from [Greasy Fork](https://greasyfork.org/en/scripts/599957-wanikani-anki-mode). It updates automatically from there.
+
+Because the name and namespace match the original, this replaces an existing install of JDurman's version.
 
 ## Usage
 

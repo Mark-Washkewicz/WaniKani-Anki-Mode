@@ -8,6 +8,8 @@
 // @match       https://preview.wanikani.com/*
 // @grant        none
 // @license      GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
+// @downloadURL  https://update.greasyfork.org/scripts/599957/Wanikani%20Anki%20Mode.user.js
+// @updateURL    https://update.greasyfork.org/scripts/599957/Wanikani%20Anki%20Mode.meta.js
 // ==/UserScript==
 
 //CREDITS
