@@ -3,7 +3,7 @@
 // @namespace    wkankimode
 // @version      3.0.13
 // @description  Anki mode for Wanikani; DoubleCheck 3.0 Support;
-// @author       JDurman
+// @author       Mark Washkewicz, JDurman
 // @match       https://www.wanikani.com/*
 // @match       https://preview.wanikani.com/*
 // @grant        none
