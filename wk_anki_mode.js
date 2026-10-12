@@ -13,6 +13,8 @@
 //CREDITS
 //Based on original Wanikani Anki Mode script by Mempo and modifications by necul and irrelephant
 //Templated the script off of the doublecheck script made by Robin Findley (rfindley).
+//Maintained fork by Mark Washkewicz: https://github.com/Mark-Washkewicz/WaniKani-Anki-Mode
+//Forked from JDurman's original: https://github.com/JDurman/WaniKani-Anki-Mode
 
 
 
