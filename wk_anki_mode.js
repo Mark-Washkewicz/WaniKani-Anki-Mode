@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wanikani Anki Mode
 // @namespace    wkankimode
-// @version      3.0.14
+// @version      3.0.15
 // @description  Anki mode for Wanikani; DoubleCheck 3.0 Support;
 // @author       Mark Washkewicz, JDurman
 // @match       https://www.wanikani.com/*
@@ -156,13 +156,18 @@ window.ankimode = {};
 
 
 
-    // WK replaced its <svg><symbol id="wk-icon__..."> sprite with <wk-icon> elements. Our star uses the old
-    // sprite format, and WKOF's Menu crashes when it can't find one, so provide a minimal sprite ourselves.
+    // WK replaced its <svg><symbol id="wk-icon__..."> sprite with <wk-icon> elements, and WKOF's Menu crashes
+    // when it can't find one to add its gear icon to, so provide a minimal sprite and icon style ourselves.
     // It lives directly in <body>, which survives Turbo page swaps.
     function ensure_icon_sprite() {
+        // WK's CSS no longer sizes or colors old-style <svg class="wk-icon"> icons such as WKOF's gear.
+        if (!document.getElementById('WKANKIMODE_icon_style')) {
+            document.head.insertAdjacentHTML('beforeend',
+                '<style id="WKANKIMODE_icon_style">svg.wk-icon {width:1em; height:1em; fill:currentColor; vertical-align:middle;}</style>');
+        }
         if (document.querySelector('svg symbol[id^="wk-icon"]')) return;
         document.body.insertAdjacentHTML('afterbegin',
-            '<svg id="WKANKIMODE_icons" xmlns="http://www.w3.org/2000/svg" style="display:none">' +
+            '<svg id="WKANKIMODE_icons" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">' +
             '<symbol id="wk-icon__star" viewBox="0 0 576 512"><path d="M316.9 18C311.6 7 300.4 0 288.1 0s-23.4 7-28.8 18L195 150.3 51.4 171.5c-12 1.8-22 10.2-25.7 21.7s-.7 24.2 7.9 32.7L137.8 329 113.2 474.7c-2 12 3 24.2 12.9 31.3s23 8 33.8 2.3l128.3-68.5 128.3 68.5c10.8 5.7 23.9 4.9 33.8-2.3s14.9-19.3 12.9-31.3L438.5 329 542.7 225.9c8.6-8.5 11.7-21.2 7.9-32.7s-13.7-19.9-25.7-21.7L381.2 150.3 316.9 18z"></path></symbol>' +
             '</svg>');
     }
@@ -489,9 +494,9 @@ window.ankimode = {};
             $('head').append('<style id="WKANKIMODE_button_style">#anki-mode.anki-active {color:#ff0; opacity:1.0;} #anki-mode { color:#fff;}</style>');
         }
         if (settings.ankimode_enabled) {
-            $('.character-header__menu-navigation').append('<a id="anki-mode" href="#" class="anki-active"><svg class="wk-icon wk-icon--star" title="Anki Mode - This allows you to turn on or off anki mode." viewBox="0 0 576 512" aria-hidden="true"><use href="#wk-icon__star"></use></svg></a>');
+            $('.character-header__menu-navigation').append('<a id="anki-mode" href="#" class="anki-active" title="Anki Mode - This allows you to turn on or off anki mode."><wk-icon icon="star" aria-hidden="true"></wk-icon></a>');
         } else {
-            $('.character-header__menu-navigation').append('<a id="anki-mode" href="#"><svg class="wk-icon wk-icon--star" title="Anki Mode - This allows you to turn on or off anki mode." viewBox="0 0 576 512" aria-hidden="true"><use href="#wk-icon__star"></use></svg></a>');
+            $('.character-header__menu-navigation').append('<a id="anki-mode" href="#" title="Anki Mode - This allows you to turn on or off anki mode."><wk-icon icon="star" aria-hidden="true"></wk-icon></a>');
         }
         $('#anki-mode').on('click', ankimode_clicked);
 
